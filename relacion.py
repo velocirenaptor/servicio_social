@@ -1,6 +1,13 @@
 import csv
 from datetime import datetime, timedelta
 
+# tolerancia máxima (ajústala luego)
+TOLERANCIA = timedelta(minutes=1000)
+
+# -----------------------------
+# Parsear fechas
+# -----------------------------
+
 def parse_fecha_foto(fecha_str):
 
     if not fecha_str:
@@ -8,97 +15,150 @@ def parse_fecha_foto(fecha_str):
 
     try:
         return datetime.strptime(
-            fecha_str,
+            fecha_str.strip(),
             "%Y:%m:%d %H:%M:%S"
-        ).date()
-
+        )
     except:
         return None
 
-def parse_fecha(fecha_str):
+
+def parse_fecha_gps(fecha_str):
 
     if not fecha_str:
         return None
 
     try:
-        return datetime.strptime(
-            fecha_str,
-            "%Y:%m:%d %H:%M:%S"
+        fecha = datetime.strptime(
+            fecha_str.strip(),
+            "%Y-%m-%dT%H:%M:%SZ"
         )
 
+        # Ajustar zona horaria
+        return fecha - timedelta(hours=6)
+
     except:
-        try:
-            fecha = datetime.strptime(
-                fecha_str,
-                "%Y-%m-%dT%H:%M:%SZ"
-            )
+        return None
 
-            return fecha - timedelta(hours=6)
 
-        except:
-            return None
-        
+# -----------------------------
+# Cargar GPS
+# -----------------------------
+
 gps_datos = []
 
 with open("datosGPS1.csv") as f:
 
     reader = csv.DictReader(f)
 
+    # Mostrar columnas reales
+    print("Columnas GPS detectadas:")
+    print(reader.fieldnames)
+
     for fila in reader:
 
-        fecha = parse_fecha(
+        fecha = parse_fecha_gps(
             fila.get("time")
         )
 
-        if fecha:
+        if not fecha:
+            continue
 
-            gps_datos.append({
-                "id": fila.get("Wpt_ID"),
-                "lat": fila.get("Latitude"),
-                "lon": fila.get("Longitude"),
-                "E_UTM": fila.get("E_UTM"),
-                "N_UTM": fila.get("N_UTM"),
-                "fecha": fecha.date()
-            })
+        # detectar columnas posibles
+        eutm = (
+            fila.get("E_UTM")
+            or fila.get("EUTM")
+            or fila.get("E UTM")
+        )
 
+        nutm = (
+            fila.get("N_UTM")
+            or fila.get("NUTM")
+            or fila.get("N UTM")
+        )
+
+        gps_datos.append({
+            "id": fila.get("Wpt_ID"),
+            "E_UTM": eutm,
+            "N_UTM": nutm,
+            "fecha": fecha
+        })
+
+
+# Ordenar por fecha (muy importante)
+gps_datos.sort(
+    key=lambda x: x["fecha"]
+)
 
 print("GPS cargados:", len(gps_datos))
 
+# Verificar primer GPS
+if gps_datos:
+    print("Primer GPS ejemplo:")
+    print(gps_datos[0])
 
-gps_por_fecha = {}
 
-for gps in gps_datos:
+# -----------------------------
+# Buscar GPS más cercano
+# -----------------------------
 
-    fecha = gps["fecha"]
+def buscar_gps_mas_cercano(fecha_foto):
 
-    if fecha not in gps_por_fecha:
-        gps_por_fecha[fecha] = []
+    gps_cercano = None
+    menor_diferencia = None
 
-    gps_por_fecha[fecha].append(gps)
+    for gps in gps_datos:
 
-print("Fechas únicas GPS:", len(gps_por_fecha))
+        diferencia = abs(
+            gps["fecha"] - fecha_foto
+        )
 
-# 🔹 Crear archivo resultado
+        if menor_diferencia is None:
+
+            menor_diferencia = diferencia
+            gps_cercano = gps
+
+        elif diferencia < menor_diferencia:
+
+            menor_diferencia = diferencia
+            gps_cercano = gps
+
+    if menor_diferencia <= TOLERANCIA:
+        return gps_cercano, menor_diferencia
+
+    return None, None
+
+
+# -----------------------------
+# Generar resultado
+# -----------------------------
+
 with open("resultado.csv", "w", newline="") as out:
 
     writer = csv.writer(out)
 
-    # encabezados
     writer.writerow([
+        "categoria",
         "nombre",
-        "id",
+        "gps_id",
         "E_UTM",
         "N_UTM",
-        "fecha"
+        "fecha_foto",
+        "diferencia_minutos"
     ])
 
-    # 🔹 leer fotos
     with open("fotos.csv") as f:
 
         reader = csv.DictReader(f)
 
+        print("\nColumnas fotos detectadas:")
+        print(reader.fieldnames)
+
+        asociadas = 0
+        sin_gps = 0
+
         for fila in reader:
 
+            categoria = fila["categoria"]
             nombre = fila["nombre"]
 
             fecha_foto = parse_fecha_foto(
@@ -108,29 +168,45 @@ with open("resultado.csv", "w", newline="") as out:
             if not fecha_foto:
                 continue
 
-            # 🔎 buscar GPS del mismo día
-            if fecha_foto in gps_por_fecha:
+            gps, diferencia = buscar_gps_mas_cercano(
+                fecha_foto
+            )
 
-                gps_del_dia = gps_por_fecha[fecha_foto]
+            if gps:
 
-                for gps in gps_del_dia:
+                minutos = round(
+                    diferencia.total_seconds() / 60,
+                    2
+                )
 
-                    writer.writerow([
-                        nombre,
-                        gps["id"],
-                        gps["E_UTM"],
-                        gps["N_UTM"],
-                        fecha_foto
-                    ])
+                writer.writerow([
+                    categoria,
+                    nombre,
+                    gps["id"],
+                    gps["E_UTM"],
+                    gps["N_UTM"],
+                    fecha_foto,
+                    minutos
+                ])
+
+                asociadas += 1
 
             else:
 
                 writer.writerow([
+                    categoria,
                     nombre,
                     "",
                     "",
                     "",
-                    fecha_foto
+                    fecha_foto,
+                    ""
                 ])
 
-print("Archivo resultado.csv generado")
+                sin_gps += 1
+
+
+print("\nArchivo resultado.csv generado")
+
+print("Fotos asociadas:", asociadas)
+print("Fotos sin GPS:", sin_gps)

@@ -3,8 +3,9 @@ import csv
 from PIL import Image
 from PIL.ExifTags import TAGS
 
-CARPETA = "../imagenes/artefactos"
-SALIDA = "fotos.csv"
+CARPETA_BASE = "../imagenes"
+SALIDA = "data/fotos.csv"
+
 
 def obtener_fecha_exif(ruta):
     try:
@@ -20,14 +21,44 @@ def obtener_fecha_exif(ruta):
 
 with open(SALIDA, mode="w", newline="", encoding="utf-8") as file:
     writer = csv.writer(file)
-    writer.writerow(["nombre", "fecha_exif"])
 
-    for archivo in os.listdir(CARPETA):
-        if archivo.lower().endswith((".jpg", ".jpeg", ".png")):
-            ruta = os.path.join(CARPETA, archivo)
+    writer.writerow([
+        "categoria",
+        "nombre",
+        "ruta",
+        "fecha_exif"
+    ])
 
-            fecha_exif = obtener_fecha_exif(ruta)
+    # recorrer carpetas
+    for categoria in os.listdir(CARPETA_BASE):
 
-            writer.writerow([archivo, fecha_exif])
+        ruta_categoria = os.path.join(
+            CARPETA_BASE,
+            categoria
+        )
+
+        if os.path.isdir(ruta_categoria):
+
+            for archivo in os.listdir(ruta_categoria):
+
+                if archivo.lower().endswith(
+                    (".jpg", ".jpeg", ".png")
+                ):
+
+                    ruta_imagen = os.path.join(
+                        ruta_categoria,
+                        archivo
+                    )
+
+                    fecha_exif = obtener_fecha_exif(
+                        ruta_imagen
+                    )
+
+                    writer.writerow([
+                        categoria,
+                        archivo,
+                        ruta_imagen,
+                        fecha_exif
+                    ])
 
 print("CSV generado:", SALIDA)
